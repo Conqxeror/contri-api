@@ -69,6 +69,15 @@ async function runChat(inputData) {
     return response.text();
 }
 
+app.get('/', async(req, res)=>{
+    try {
+        res.json("Hello! Thank you for checking out. I am working !!");
+    } catch (error) {
+        console.error('Error:', error.message);
+        res.status(error.response ? error.response.status : 500).json({ error: error.message });
+    }
+})
+
 // Define a new API endpoint to handle user requests for code changes
 app.post('/code-changes', async (req, res) => {
     const { mdxContent, issues, userRequest } = req.body;
