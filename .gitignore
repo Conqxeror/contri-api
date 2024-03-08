@@ -2,3 +2,4 @@ node_modules
 *issues.json
 *.mdx
 *.pdf
+.env

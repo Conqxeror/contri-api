@@ -4,13 +4,85 @@ const { execSync } = require('child_process');
 const markdownPdf = require('markdown-pdf');
 const axios = require('axios');
 const cors = require('cors');
-const markdownIt = require('markdown-it')();
+require('dotenv').config();
+
+const {
+    GoogleGenerativeAI,
+    HarmCategory,
+    HarmBlockThreshold,
+} = require("@google/generative-ai");
 
 const app = express();
-app.use(cors());
-const PORT = process.env.PORT || 3000;
 
-app.use(express.json());
+app.use(cors());
+
+app.use(express.json()); 
+app.use(express.urlencoded({ extended: true }));
+app.use(express.raw());
+
+const PORT = process.env.PORT;
+const API_KEY = process.env.YOUR_API_KEY;
+const MODEL_NAME = "gemini-1.0-pro";
+
+async function runChat(inputData) {
+    const genAI = new GoogleGenerativeAI(API_KEY);
+    const model = genAI.getGenerativeModel({ model: MODEL_NAME });
+
+    const generationConfig = {
+        temperature: 0.9,
+        topK: 1,
+        topP: 1,
+        maxOutputTokens: 2048,
+    };
+
+    const safetySettings = [
+        {
+            category: HarmCategory.HARM_CATEGORY_HARASSMENT,
+            threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+        },
+        {
+            category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+            threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+        },
+        {
+            category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+            threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+        },
+        {
+            category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+            threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+        },
+    ];
+
+    const chat = model.startChat({
+        generationConfig,
+        safetySettings,
+        history: [],
+    });
+
+    const result = await chat.sendMessage(inputData);
+    return result.response.text();
+}
+
+// Define a new API endpoint to handle user requests for code changes
+app.post('/code-changes', async (req, res) => {
+    const { mdxContent, issues, userRequest } = req.body;
+    console.log(req.body);
+
+    try {
+        // Prepare input data for the AI model
+        const inputData = `${mdxContent}\n\nIssues:\n${JSON.stringify(issues)}\n\nUser Request: ${userRequest}`;
+
+        // Call the AI model to get a response
+        const response = await runChat(inputData);
+
+        // Send the response back to the user
+        res.json({ response });
+    } catch (error) {
+        console.error('Error:', error.message);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
 
 // Function to recursively traverse directory and generate MDX content
 function traverseDirectory(dir, mdxContent, pdfContent) {
@@ -37,7 +109,7 @@ function traverseDirectory(dir, mdxContent, pdfContent) {
             // Read the file content only if it's not an image or ICO file
             let fileContent = '';
             if (!['jpg', 'jpeg', 'png', 'gif', 'ico'].includes(fileExtension)) {
-                fileContent = fs.readFileSync(filePath, 'utf8');
+                fileContent = fs.readFileSync(filePath, 'utf8').replace(/\r?\n|\r/g, ''); // Replace line breaks and carriage returns
             }
 
             mdxContent += `\`${filePath}\`\n\n\`\`\`javascript\n${fileContent}\n\`\`\`\n\n`;
