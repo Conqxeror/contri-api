@@ -4,6 +4,7 @@ const { execSync } = require('child_process');
 const markdownPdf = require('markdown-pdf');
 const axios = require('axios');
 const cors = require('cors');
+const markdownIt = require('markdown-it')();
 
 const app = express();
 app.use(cors());
@@ -95,12 +96,15 @@ app.post('/generate-files', async (req, res) => {
         }));
         fs.writeFileSync(`${repoName}_issues.json`, JSON.stringify(importantIssueDetails, null, 2));
 
-        // Respond with generated files
-        res.json({
+        // Respond with generated files and issues
+        const response = {
             mdxFile: `${repoName}.mdx`,
             pdfFile: `${repoName}.pdf`,
-            issuesFile: `${repoName}_issues.json`
-        });
+            issuesFile: `${repoName}_issues.json`,
+            mdxContent: finalMdxContent, // Adding MDX content to the response
+            issues: importantIssueDetails // Adding issues to the response
+        };
+        res.json(response);
     } catch (error) {
         console.error('Error:', error.message);
         res.status(500).json({ error: 'Internal server error' });
