@@ -4,7 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "nodemon --delay 5 index.js"
+    "start": "nodemon index.js",
+    "dev": "node index.js"
   },
   "keywords": [],
   "author": "",

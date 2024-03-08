@@ -1,9 +1,10 @@
 const express = require('express');
-const fs = require('fs');
+const fs = require('fs/promises');
 const { execSync } = require('child_process');
 const markdownPdf = require('markdown-pdf');
 const axios = require('axios');
 const cors = require('cors');
+const child_process = require('child_process');
 require('dotenv').config();
 
 const {
@@ -15,16 +16,18 @@ const {
 const app = express();
 
 app.use(cors());
-
-app.use(express.json()); 
+app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(express.raw());
 
 const PORT = process.env.PORT;
 const API_KEY = process.env.YOUR_API_KEY;
 const MODEL_NAME = "gemini-1.0-pro";
 
+let cloneProcess = null; // Variable to store the cloning process
+
 async function runChat(inputData) {
+    console.log("AI Process");
+    console.log(inputData);
     const genAI = new GoogleGenerativeAI(API_KEY);
     const model = genAI.getGenerativeModel({ model: MODEL_NAME });
 
@@ -61,7 +64,9 @@ async function runChat(inputData) {
     });
 
     const result = await chat.sendMessage(inputData);
-    return result.response.text();
+    const response = result.response;
+    console.log(response.text());
+    return response.text();
 }
 
 // Define a new API endpoint to handle user requests for code changes
@@ -71,7 +76,7 @@ app.post('/code-changes', async (req, res) => {
 
     try {
         // Prepare input data for the AI model
-        const inputData = `${mdxContent}\n\nIssues:\n${JSON.stringify(issues)}\n\nUser Request: ${userRequest}`;
+        const inputData = `You are a software developer. Below is the Code, issues and User request to make changes. Make sure to make changes in the code given according to the issue given by fixing the issue: \n\n\n ${mdxContent}\n\nIssues:\n${JSON.stringify(issues)}\n\nUser Request: ${userRequest}`;
 
         // Call the AI model to get a response
         const response = await runChat(inputData);
@@ -85,37 +90,29 @@ app.post('/code-changes', async (req, res) => {
 });
 
 // Function to recursively traverse directory and generate MDX content
-function traverseDirectory(dir, mdxContent, pdfContent) {
-    const files = fs.readdirSync(dir);
-    files.forEach(file => {
+async function traverseDirectory(dir, mdxContent, pdfContent) {
+    const files = await fs.readdir(dir);
+    for (const file of files) {
         const filePath = `${dir}/${file}`;
-        const stat = fs.statSync(filePath);
+        const stat = await fs.stat(filePath);
         if (stat.isDirectory()) {
-            const hasCodeFiles = fs.readdirSync(filePath).some(fileName => fileName.endsWith('.js') || fileName.endsWith('.jsx') || fileName.endsWith('.ts') || fileName.endsWith('.tsx') || fileName.endsWith('.py') || fileName.endsWith('.css') || fileName.endsWith('.json')); // Add more file extensions if needed
+            const hasCodeFiles = (await fs.readdir(filePath)).some(fileName => ['.js', '.jsx', '.ts', '.tsx', '.py', '.css', '.json', '.sh'].some(ext => fileName.endsWith(ext)));
             if (hasCodeFiles) {
                 mdxContent += `## ${filePath}\n\n`;
                 pdfContent += `## ${filePath}\n\n`;
-                const { mdxContent: nestedMdxContent, pdfContent: nestedPdfContent } = traverseDirectory(filePath, '', ''); // Recursive call with empty content strings
+                const { mdxContent: nestedMdxContent, pdfContent: nestedPdfContent } = await traverseDirectory(filePath, '', '');
                 mdxContent += nestedMdxContent;
                 pdfContent += nestedPdfContent;
             }
-        } else if (file !== '.gitignore' && file !== 'package-lock.json') { // Exclude certain files
-            // Check file extension and skip if it's an image or ICO file
+        } else if (file !== '.gitignore' && file !== 'package-lock.json') {
             const fileExtension = file.split('.').pop().toLowerCase();
-            if (['jpg', 'jpeg', 'png', 'gif', 'ico'].includes(fileExtension)) {
-                return;
+            if (!['jpg', 'jpeg', 'png', 'gif', 'ico', 'md'].includes(fileExtension)) {
+                const fileContent = (await fs.readFile(filePath, 'utf8')).replace(/\r?\n|\r/g, '');
+                mdxContent += `\`${filePath}\`\n\n\`\`\`javascript\n${fileContent}\n\`\`\`\n\n`;
+                pdfContent += `File Path: ${filePath}\n\nCode:\n\n${fileContent}\n\n`;
             }
-            
-            // Read the file content only if it's not an image or ICO file
-            let fileContent = '';
-            if (!['jpg', 'jpeg', 'png', 'gif', 'ico'].includes(fileExtension)) {
-                fileContent = fs.readFileSync(filePath, 'utf8').replace(/\r?\n|\r/g, ''); // Replace line breaks and carriage returns
-            }
-
-            mdxContent += `\`${filePath}\`\n\n\`\`\`javascript\n${fileContent}\n\`\`\`\n\n`;
-            pdfContent += `File Path: ${filePath}\n\nCode:\n\n${fileContent}\n\n`;
         }
-    });
+    }
     return { mdxContent, pdfContent };
 }
 
@@ -143,15 +140,14 @@ app.post('/generate-files', async (req, res) => {
         const mdxContent = '# Repository Code\n\n';
         let pdfContent = '';
 
-        const { mdxContent: finalMdxContent, pdfContent: finalPdfContent } = traverseDirectory(repoName, mdxContent, pdfContent);
+        const { mdxContent: finalMdxContent, pdfContent: finalPdfContent } = await traverseDirectory(repoName, mdxContent, pdfContent);
 
         // Save MDX file
-        fs.writeFileSync(`${repoName}.mdx`, finalMdxContent);
+        await fs.writeFile(`${repoName}.mdx`, finalMdxContent);
 
         // Save PDF file
-        markdownPdf().from.string(finalPdfContent).to(`${repoName}.pdf`, function () {
-            console.log('PDF file generated successfully.');
-        });
+        await markdownPdf().from.string(finalPdfContent).to(`${repoName}.pdf`);
+        console.log('PDF file generated successfully.');
 
         // Fetch and save issues as JSON file
         const issues = await fetchIssues(repoOwner, repoName);
@@ -166,15 +162,15 @@ app.post('/generate-files', async (req, res) => {
                 avatarUrl: issue.user.avatar_url
             }
         }));
-        fs.writeFileSync(`${repoName}_issues.json`, JSON.stringify(importantIssueDetails, null, 2));
+        await fs.writeFile(`${repoName}_issues.json`, JSON.stringify(importantIssueDetails, null, 2));
 
         // Respond with generated files and issues
         const response = {
             mdxFile: `${repoName}.mdx`,
             pdfFile: `${repoName}.pdf`,
             issuesFile: `${repoName}_issues.json`,
-            mdxContent: finalMdxContent, // Adding MDX content to the response
-            issues: importantIssueDetails // Adding issues to the response
+            mdxContent: finalMdxContent,
+            issues: importantIssueDetails
         };
         res.json(response);
     } catch (error) {
@@ -186,9 +182,77 @@ app.post('/generate-files', async (req, res) => {
     }
 });
 
+// API endpoint to handle user requests for custom changes and issue fixing
+app.post('/fix-issue', async (req, res) => {
+    const { githubRepoURL, customChanges, issueNumber } = req.body;
+
+    try {
+        // Extract repo owner and repo name from the GitHub repo URL
+        const urlParts = githubRepoURL.split('/');
+        const repoOwner = urlParts[urlParts.length - 2];
+        const repoName = urlParts[urlParts.length - 1];
+
+        // Kill any existing clone process
+        if (cloneProcess !== null) {
+            cloneProcess.kill();
+            cloneProcess = null;
+        }
+
+        // Clone the repository
+        cloneProcess = child_process.exec(`git clone ${githubRepoURL}`, async (error, stdout, stderr) => {
+            if (error) {
+                console.error(`Error cloning repository: ${error}`);
+                res.status(500).json({ error: 'Internal server error' });
+                return;
+            }
+
+            console.log(`Repository cloned successfully: ${githubRepoURL}`);
+
+            try {
+                // Fetch code from the cloned repository
+                const { mdxContent: finalMdxContent } = await traverseDirectory(repoName, '# Repository Code\n\n', '');
+
+                // Fetch issues from the cloned repository
+                const issues = await fetchIssues(repoOwner, repoName);
+
+                // Add custom changes to the code
+                let modifiedCode = `You are a software developer. Below is the Code, issues and User request to make changes. Make sure to make changes in the code given according to the issue given by fixing the issue:\n\n\n` + finalMdxContent + '\n\nCustom Changes:\n' + customChanges;
+
+                // If issueNumber is provided, find the issue with that number and append it to the modified code
+                if (issueNumber) {
+                    const targetIssue = issues.find(issue => issue.number === issueNumber);
+                    if (targetIssue) {
+                        modifiedCode += `\n\nFix the given Issue: ${issueNumber}:\n${targetIssue.title}\n${targetIssue.body}`;
+                    }
+                }
+
+                // Call the AI model to fix the issue
+                const response = await runChat(modifiedCode);
+                res.json({ response });
+            } catch (error) {
+                console.error('Error:', error.message);
+                res.status(500).json({ error: 'Internal server error' });
+            } finally {
+                // Clean up cloned repository after a delay
+                cleanupRepository(repoName);
+            }
+        });
+
+        cloneProcess.on('exit', (code, signal) => {
+            if (code !== 0) {
+                console.error(`Git clone process exited with code ${code} and signal ${signal}`);
+            }
+        });
+    } catch (error) {
+        console.error('Error:', error.message);
+        res.status(500).json({ error: 'Internal server error' });
+        cleanupRepository(repoName);
+    }
+});
+
 // Function to clean up cloned repository after a delay
 function cleanupRepository(repoName) {
-    setTimeout(() => {
+    setTimeout(async () => {
         try {
             execSync(`rm -rf ${repoName}`);
             console.log('Repository cleaned up successfully.');
