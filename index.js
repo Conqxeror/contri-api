@@ -2,6 +2,7 @@ const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
 require('dotenv').config();
+const stream = require('stream'); // Import the stream library
 
 const {
     GoogleGenerativeAI,
@@ -69,8 +70,19 @@ async function runChat(inputData) {
         history: [],
     });
 
-    const result = await chat.sendMessage(inputData);
-    return result.response.text();
+    // Create a stream to handle server-side streaming
+    const streamOutput = new stream.PassThrough();
+
+    chat.sendMessage(inputData, (err, response) => {
+        if (err) {
+            streamOutput.end(err.message);
+        } else {
+            streamOutput.push(response.response.text());
+            streamOutput.end();
+        }
+    });
+
+    return streamOutput;
 }
 
 async function fetchRepoContent(repoOwner, repoName, path = '') {
@@ -129,8 +141,9 @@ app.post('/fix-issue', async (req, res) => {
             }
         }
 
+        // Use server-side streaming to send the response in chunks
         const response = await runChat(modifiedCode);
-        res.json({ response });
+        response.pipe(res);
     } catch (error) {
         console.error('Error:', error.message);
         res.status(500).json({ error: 'Internal server error' });
