@@ -116,6 +116,11 @@ app.post('/fix-issue', async (req, res) => {
     const { githubRepoURL, customChanges, issueNumber } = req.body;
 
     try {
+
+        const intervalId = setInterval(() => {
+            res.write('processing...\n');
+        }, 2000);
+
         const urlParts = githubRepoURL.split('/');
         const repoOwner = urlParts[urlParts.length - 2];
         const repoName = urlParts[urlParts.length - 1].replace('.git', '');
@@ -133,6 +138,9 @@ app.post('/fix-issue', async (req, res) => {
         }
 
         const response = await runChat(modifiedCode);
+
+        clearInterval(intervalId);
+        
         res.json({ response });
     } catch (error) {
         console.error('Error:', error.message);
