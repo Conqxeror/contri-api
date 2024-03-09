@@ -86,7 +86,7 @@ async function fetchRepoContent(repoOwner, repoName, path = '') {
         if (entry.type === 'file') {
             console.log('file');
             const fileExtension = entry.name.split('.').pop().toLowerCase();
-            if (!['jpg', 'jpeg', 'png', 'gif', 'ico', 'md', 'json', 'svg'].includes(fileExtension)) {
+            if (!['jpg', 'jpeg', 'png', 'gif', 'ico', 'md', 'json', 'svg', 'otf', 'gif', 'txt'].includes(fileExtension)) {
                 const fileContent = await axios.get(entry.download_url, { responseType: 'text' }).then(res => res.data);
                 mdxContent += `\`${entry.path}\`\n\n\`\`\`javascript\n${fileContent}\n\`\`\`\n\n`;
                 pdfContent += `File Path: ${entry.path}\n\nCode:\n\n${fileContent}\n\n`;
@@ -116,7 +116,7 @@ app.post('/fix-issue', async (req, res) => {
     const { githubRepoURL, customChanges, issueNumber } = req.body;
 
     try {
-        
+
         const urlParts = githubRepoURL.split('/');
         const repoOwner = urlParts[urlParts.length - 2];
         const repoName = urlParts[urlParts.length - 1].replace('.git', '');
