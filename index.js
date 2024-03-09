@@ -2,7 +2,6 @@ const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
 require('dotenv').config();
-const stream = require('stream'); // Import the stream library
 
 const {
     GoogleGenerativeAI,
@@ -35,6 +34,7 @@ app.get('/', async(req, res)=>{
 })
 
 async function runChat(inputData) {
+    console.log(inputData);
     const genAI = new GoogleGenerativeAI(API_KEY);
     const model = genAI.getGenerativeModel({ model: MODEL_NAME });
 
@@ -70,19 +70,8 @@ async function runChat(inputData) {
         history: [],
     });
 
-    // Create a stream to handle server-side streaming
-    const streamOutput = new stream.PassThrough();
-
-    chat.sendMessage(inputData, (err, response) => {
-        if (err) {
-            streamOutput.end(err.message);
-        } else {
-            streamOutput.push(response.response.text());
-            streamOutput.end();
-        }
-    });
-
-    return streamOutput;
+    const result = await chat.sendMessage(inputData);
+    return result.response.text();
 }
 
 async function fetchRepoContent(repoOwner, repoName, path = '') {
@@ -95,6 +84,7 @@ async function fetchRepoContent(repoOwner, repoName, path = '') {
 
     for (const entry of contents) {
         if (entry.type === 'file') {
+            console.log('file');
             const fileExtension = entry.name.split('.').pop().toLowerCase();
             if (!['jpg', 'jpeg', 'png', 'gif', 'ico', 'md', 'json', 'svg'].includes(fileExtension)) {
                 const fileContent = await axios.get(entry.download_url, { responseType: 'text' }).then(res => res.data);
@@ -102,6 +92,7 @@ async function fetchRepoContent(repoOwner, repoName, path = '') {
                 pdfContent += `File Path: ${entry.path}\n\nCode:\n\n${fileContent}\n\n`;
             }
         } else if (entry.type === 'dir') {
+            console.log('dir');
             const { mdxContent: nestedMdxContent, pdfContent: nestedPdfContent } = await fetchRepoContent(repoOwner, repoName, entry.path);
             mdxContent += `## ${entry.path}\n\n${nestedMdxContent}`;
             pdfContent += `## ${entry.path}\n\n${nestedPdfContent}`;
@@ -141,9 +132,8 @@ app.post('/fix-issue', async (req, res) => {
             }
         }
 
-        // Use server-side streaming to send the response in chunks
         const response = await runChat(modifiedCode);
-        response.pipe(res);
+        res.json({ response });
     } catch (error) {
         console.error('Error:', error.message);
         res.status(500).json({ error: 'Internal server error' });
